@@ -32,6 +32,116 @@ The importatn key technical points in the composer-2 paper [link here](https://a
    upon job restart, the scheduler considers these when determining whether to dispatch new
    work or simply load ready groups.
 
+### Capping max the POD scheduler
+
+1. scheduler_max_inflight_limit help us limit the scheduling environment and inference may cap for stability
+   without breaking stuff
+
+```txt
+max groups running
+max rollouts running
+max rollouts per task type
+max retries
+max stale rollouts
+max object-store pressure
+```
+
+### How rollout policy generate staleness works ?
+
+1. Montioring the rollout generation in where the new policy is updated but the sample is still from the old version so force to stop and update the inference policy version here
+
+```txt
+current policy = v110
+rollout started at v103
+policy lag = 7
+max allowed lag = 5
+
+Then reconciler might:
+
+current policy = v110
+rollout started at v103
+policy lag = 7
+max allowed lag = 5
+```
+
+## Managing the GPU cluster node for training distribution
+
+1. Passive and Active health checks on all nodes; if hardware fault is detected, they mark the node unhealthy for scheduling and continue training with warm standby nodes
+
+```txt
+Passive checks:
+
+process died
+heartbeat stopped
+NCCL timeout
+GPU OOM
+ECC error log
+node disappeared
+disk full
+```
+
+```txt
+Active checks:
+
+send ping RPC
+run GPU availability probe
+run small CUDA op
+run network collective test
+check disk write/read
+```
+
+the schduler reaction should be:
+
+```txt
+1. stop assigning new actors to that node
+2. checkpoint/kill affected process group
+3. activate warm standby node
+4. recreate failed actor/process group on standby
+5. reload latest checkpoint
+6. continue training
+```
+
+### What happens on restarting the reconciler ?
+
+On restart of the training reconciler manager we should check:
+
+```txt
+1. Load latest model checkpoint.
+2. Load reconciler metadata checkpoint.
+3. Scan NFS for ready groups.
+4. Put ready groups into Ray object store.
+5. Scan rollout checkpoints / environment snapshots.
+6. Resume or verify partially completed rollouts.
+7. Mark unrecoverable rollouts failed/retryable.
+8. Only then dispatch new rollouts if training still needs data.
+```
+
+### Where does training data comes from ?
+
+1. Composer 2 is trained by reinforcement learning on a large set of coding tasks. These tasks are run in
+   environments that emulate real Cursor sessions as closely as possible.
+
+### Complete Flow 
+```txt
+reconciler
+task sampler
+rollout group manager
+slot manager
+future tracker
+Ray object store writer
+global sequence packer
+PyTorch distributed trainer
+policy gradient optimizer
+KL regularization
+model checkpointing
+weight-delta publishing
+fault tolerance
+node health checks
+actor draining/live code update
+rollout/group checkpoint recovery
+
+```
+
 ## Environment Service
 
 ### Triggering multiple pods in anyrun Cluster ?
@@ -70,6 +180,7 @@ The importatn key technical points in the composer-2 paper [link here](https://a
    tem and memory level. This unlocks useful capabilities during RL, such as mid-trajectory
    rollout checkpointing and post-rollout state capture for future introspection. When a pod fork is requested, we attempt to first schedule the fork onto the same node; if not feasible due to space constraints, we live-migrate pod state to a node with capacity.
 2. we rely on memory snapshots of the codebase environment state, so that upon recovery, we can pass the reconstructed codebase environment to verifiers. For group checkpointing, we write sequences with advantages tagged with policy versions to NFS; upon job restart, the scheduler considers these when determining whether to dispatch new work or simply load ready groups.
+3. we might remove the old snapshot from the storage which is already completed in background worker
 
 ### How the non-linear penalizing imrpove the efficiency of the model ?
 
@@ -91,6 +202,25 @@ $$
 
 1. Within a cluster,a distributed set of Anyrun managers schedule pods, scale cloud compute provisioned
    across multiple regions, and perform state reconciliation to manage hundreds of thousands of pods per cluster.
+
+
+### Complete Flow
+```txt
+global environment API
+cluster router
+distributed Anyrun managers
+pod scheduler
+cloud autoscaler
+Firecracker VM boot
+repo snapshot loading
+tool RPC startup
+Anygress egress control
+filesystem/memory snapshotting
+pod forking
+live migration
+hardware-pressure-aware scheduling
+
+```
 
 ## Inference Service
 
@@ -118,10 +248,51 @@ $$
 }
 ```
 
+### how Mid rollout can happen ?
+
+```txt
+rollout 1: v104 -> policy version 
+rollout 2: v104
+hotload happens
+rollout 3: v105
+rollout 4: v105
+```
+
+That is what “mid-rollout” means. It does not mean they change weights halfway through a single matrix multiplication
+
+
+### Compelete Flow
+```txt
+request router
+model replicas
+dynamic batching
+policy-version tracking
+MoE router metadata return
+old_logprob return
+delta downloader
+local weight reconstruction
+hotload controller
+cross-region inference clusters
+
+```
+
+## Evaluation Service 
+
+### Complete flow
+
+```txt
+checkpoint selection
+eval deployment leasing
+production backend pinning
+Cursor client pinning
+Anyrun eval environment launch
+CursorBench runner
+public benchmark runner
+accuracy/cost/latency/token metrics
+```
+
 ## Things which is hard to observer/understand | need clarification
 
 1. To minimize the number of training job restarts, we use a reactive configuration system and support live code updates on a per-process level; when new code is deployed, existing actors are drained of in-flight requests and transparently replaced.
-
-2.We run passive and active health checks on all
-nodes during training; upon detection of a hardware fault, we mark the node as unhealthy
-for scheduling but continue training with warm standby nodes
+2. We run passive and active health checks on all nodes during training; upon detection of a hardware fault, we mark the node as unhealt for scheduling but continue training with warm standby nodes
+3. hotloading model weights is complex one, still not sure how they've done it
