@@ -1,22 +1,45 @@
 ```mermaid
 
 
-flowchart TB
-    subgraph EVAL_SERVICE["Evaluation Service"]
-        EVAL_SCHED["Eval Scheduler"]
-        CKPT_PICKER["Checkpoint Picker"]
-        LEASE["Evaluation Deployment Lease"]
-        PROD_BACKEND["Pinned Production Backend"]
-        CURSOR_CLIENT["Pinned Cursor Client"]
-        EVAL_RUNNER["Evaluation Runner"]
-        METRICS["Metrics Aggregator"]
-    end
+flowchart TD
+    A[Training Service<br/>publishes new checkpoint / weight delta] --> B[Trigger Evaluation]
 
-    CKPT_PICKER --> LEASE
-    LEASE --> PROD_BACKEND
-    PROD_BACKEND --> CURSOR_CLIENT
-    CURSOR_CLIENT --> EVAL_RUNNER
-    EVAL_RUNNER --> METRICS
+    B --> C[Evaluation Service<br/>creates EvaluationRun]
 
+    C --> D[Lease Eval Inference Deployment]
+    D --> E[Sync checkpoint weights]
+    E --> F[Eval Model Endpoint Ready]
 
+    C --> G[Select Benchmark Suite]
+
+    G --> H[CursorBench]
+    G --> I[SWE-bench Multilingual]
+    G --> J[Terminal-Bench]
+    G --> K[Other Internal / Public Evals]
+
+    H --> L[Create Anyrun Environment]
+    I --> L
+    J --> L
+    K --> L
+
+    L --> M[Initialize codebase + task prompt]
+
+    F --> N[Run Cursor Agent<br/>production-like harness]
+    M --> N
+
+    N --> O[Agent uses tools<br/>read / edit / shell / search]
+    O --> P[Final codebase state / answer]
+
+    P --> Q[Benchmark Scorer]
+
+    Q --> R[Accuracy]
+    Q --> S[Completion Tokens]
+    Q --> T[End-to-End Latency]
+    Q --> U[Inference Cost]
+
+    R --> V[Evaluation Report]
+    S --> V
+    T --> V
+    U --> V
+ 
 ```
