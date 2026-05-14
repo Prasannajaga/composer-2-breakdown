@@ -55,3 +55,34 @@ sequenceDiagram
     Router->>Replica: new requests use v105
 
 ```
+
+
+```mermaid
+flowchart TD
+    B[Inference Service API]
+
+    subgraph INF[Inference Service]
+        B --> E[Fireworks Client Wrapper<br/>adds headers + logprobs]
+        E --> F[Retry Handler<br/>425/backoff, preserve session]
+        H[Weight Sync Controller<br/>new checkpoint published] --> I[Fireworks Hot-load Manager]
+    end
+
+    subgraph FW[Fireworks Serving Layer]
+        J[Hot-load Deployment]
+        K[Replica A<br/>KV cache]
+        L[Replica B<br/>KV cache]
+        M[Current Snapshot<br/>policy_v104/v105]
+    end
+
+    E --> J
+    J --> K
+    J --> L
+    K --> M
+    L --> M
+
+    J -->|tokens + logprobs| F
+    F -->|model action| B
+
+    I -->|load snapshot / poll readiness| J
+
+```
